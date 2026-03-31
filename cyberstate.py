@@ -1,45 +1,13 @@
-from collections import Counter
-import string
-
-import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-
-def build_frequency_table(text: str) -> tuple[pd.DataFrame, int]:
-    normalized = text.lower()
-    letters = [char for char in normalized if char in string.ascii_lowercase]
-    counter = Counter(letters)
-    total_letters = len(letters)
-
-    rows = []
-    for letter in string.ascii_lowercase:
-        count = counter.get(letter, 0)
-        frequency = count / total_letters if total_letters else 0
-        rows.append(
-            {
-                "Letter": letter.upper(),
-                "Count": count,
-                "Frequency": frequency,
-            }
-        )
-
-    data = pd.DataFrame(rows).sort_values(
-        by=["Frequency", "Count", "Letter"],
-        ascending=[False, False, True],
-        ignore_index=True,
-    )
-    return data, total_letters
-
-
-def build_summary(text: str) -> dict[str, int]:
-    total_chars = len(text)
-    total_letters = sum(1 for char in text.lower() if char in string.ascii_lowercase)
-    return {
-        "total_chars": total_chars,
-        "total_letters": total_letters,
-        "is_empty": int(not text.strip()),
-    }
+from analyzer import (
+    SAMPLE_TEXT,
+    build_export_csv,
+    build_frequency_table,
+    build_result_insights,
+    build_summary,
+)
 
 
 def render_styles() -> None:
@@ -110,7 +78,7 @@ def render_empty_state(message: str) -> None:
     st.markdown(
         f"""
         <div class="status-box">
-            <strong>Result</strong><br>
+            <strong>结果</strong><br>
             {message}
         </div>
         """,
@@ -118,22 +86,24 @@ def render_empty_state(message: str) -> None:
     )
 
 
-st.set_page_config(page_title="Letter Frequency Analyzer", layout="wide")
+st.set_page_config(page_title="字母频率分析器", layout="wide")
 render_styles()
 
 if "analysis" not in st.session_state:
     st.session_state.analysis = None
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
 
-st.title("Letter Frequency Analyzer")
-st.caption("统计英文文本字母频率，提供可视化结果分析。")
+st.title("字母频率分析器")
+st.caption("统计英文文本中的字母频率，并提供清晰的可视化结果。")
 
 left_col, right_col = st.columns([1, 1.45], gap="large")
 
 with left_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Input")
+    st.subheader("输入")
     st.markdown(
-        '<div class="section-note">选择输入方式，先看输入质量，再执行分析。</div>',
+        '<div class="section-note">选择输入方式，先查看输入统计，再执行分析。</div>',
         unsafe_allow_html=True,
     )
 
@@ -144,12 +114,21 @@ with left_col:
         label_visibility="collapsed",
     )
 
-    input_text = ""
+    input_text = st.session_state.input_text
     if input_mode == "直接输入":
+        sample_col, helper_col = st.columns([1, 1.4])
+        with sample_col:
+            if st.button("填充示例文本", use_container_width=True):
+                st.session_state.input_text = SAMPLE_TEXT
+                input_text = SAMPLE_TEXT
+        with helper_col:
+            st.caption("首次使用可以先载入示例文本，了解分析流程后再替换为自己的内容。")
+
         input_text = st.text_area(
-            "输入英文文本",
-            placeholder="Paste or type English text here...",
+            "英文文本",
+            placeholder="请在这里粘贴或输入英文文本……",
             height=260,
+            key="input_text",
             label_visibility="collapsed",
         )
     else:
@@ -157,28 +136,30 @@ with left_col:
         if uploaded_file is not None:
             try:
                 input_text = uploaded_file.read().decode("utf-8")
-                st.caption(f"已载入文件: {uploaded_file.name}")
+                st.session_state.input_text = input_text
+                st.caption(f"已载入文件：{uploaded_file.name}")
             except UnicodeDecodeError:
                 input_text = ""
-                st.error("文件解码失败，目前仅支持 UTF-8 编码的 .txt 文件。")
+                st.session_state.input_text = ""
+                st.error("文件解码失败，当前仅支持 UTF-8 编码的 `.txt` 文件。")
 
     summary = build_summary(input_text)
     st.markdown("### 输入统计")
     stat_col1, stat_col2 = st.columns(2)
     with stat_col1:
-        st.metric("字符数 Chars", summary["total_chars"])
+        st.metric("字符数", summary["total_chars"])
     with stat_col2:
-        st.metric("字母数 Letters", summary["total_letters"])
+        st.metric("字母数", summary["total_letters"])
 
     if summary["is_empty"]:
-        st.caption("当前没有可分析内容。")
+        st.caption("请先输入英文文本或上传 TXT 文件，然后点击“开始分析”。")
     elif summary["total_letters"] == 0:
-        st.caption("已检测到输入，但没有英文字符。")
+        st.caption("已检测到输入内容，但其中不包含英文字母。")
     else:
-        st.caption("输入可用于频率分析。")
+        st.caption("当前输入可用于字母频率分析。")
 
     analyze = st.button(
-        "Analyze",
+        "开始分析",
         type="primary",
         use_container_width=True,
         disabled=bool(summary["is_empty"]),
@@ -196,38 +177,39 @@ with left_col:
 
 with right_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.subheader("Results")
+    st.subheader("结果")
     st.markdown(
-        '<div class="section-note">摘要优先，图表其次，详细数据默认折叠。</div>',
+        '<div class="section-note">先看结果摘要，再查看图表和详细数据。</div>',
         unsafe_allow_html=True,
     )
 
     analysis = st.session_state.analysis
     if analysis is None:
-        render_empty_state("在左侧输入文本或上传文件后，点击 Analyze 查看结果。")
+        render_empty_state("先在左侧输入或上传内容，再点击“开始分析”，结果会显示在这里。")
     else:
         data = analysis["data"].copy()
         total_letters = analysis["total_letters"]
 
         if total_letters == 0:
-            render_empty_state("当前输入没有可统计的英文字符，请改用英文文本再分析。")
+            render_empty_state("当前输入中没有可供统计的英文字母，请改用英文文本重新分析。")
         else:
             top_letter = data.iloc[0]
             bottom_letter = data.iloc[-1]
+            insights = build_result_insights(data, total_letters)
 
             st.markdown(
                 f"""
                 <div class="summary-strip">
                     <div class="summary-card">
-                        <div class="summary-label">Total Letters</div>
+                        <div class="summary-label">总字母数</div>
                         <div class="summary-value">{total_letters}</div>
                     </div>
                     <div class="summary-card">
-                        <div class="summary-label">Top Letter</div>
+                        <div class="summary-label">最高频字母</div>
                         <div class="summary-value">{top_letter["Letter"]} ({top_letter["Frequency"]:.2%})</div>
                     </div>
                     <div class="summary-card">
-                        <div class="summary-label">Lowest Letter</div>
+                        <div class="summary-label">最低频字母</div>
                         <div class="summary-value">{bottom_letter["Letter"]} ({bottom_letter["Frequency"]:.2%})</div>
                     </div>
                 </div>
@@ -235,14 +217,25 @@ with right_col:
                 unsafe_allow_html=True,
             )
 
+            top_three_text = "，".join(
+                f'{item["Letter"]}（{item["Frequency"]:.2%}）'
+                for item in insights["top_three"]
+            )
+            st.markdown(f"**Top 3 字母：** {top_three_text}")
+
+            if insights["short_sample"]:
+                st.caption("样本较短，当前分布仅供参考。建议输入更长的英文文本以获得更稳定的结果。")
+            elif insights["sparse_distribution"]:
+                st.caption("当前输入中出现的有效字母种类较少，摘要仅反映这段文本的局部分布。")
+
             slider_col, label_col = st.columns([1.6, 1])
             with slider_col:
-                top_n = st.slider("Top N 高亮", min_value=1, max_value=10, value=5)
+                top_n = st.slider("高亮前 N 个字母", min_value=1, max_value=10, value=5)
             with label_col:
-                highlighted = ", ".join(data.head(top_n)["Letter"].tolist())
-                st.caption(f"Highlight: {highlighted}")
+                highlighted = "，".join(data.head(top_n)["Letter"].tolist())
+                st.caption(f"当前高亮：{highlighted}")
 
-            data["Group"] = "Top N"  # default value overwritten below
+            data["Group"] = "Top N"
             data.loc[top_n:, "Group"] = "Others"
             data.loc[: top_n - 1, "Group"] = "Top N"
 
@@ -257,8 +250,8 @@ with right_col:
                     "Others": "#cfd7d2",
                 },
                 labels={
-                    "Letter": "Letter",
-                    "Frequency": "Frequency",
+                    "Letter": "字母",
+                    "Frequency": "频率",
                 },
             )
             fig.update_traces(textposition="outside", cliponaxis=False)
@@ -279,9 +272,18 @@ with right_col:
 
             st.plotly_chart(fig, use_container_width=True)
 
-            with st.expander("查看详细数据 / Detailed Data"):
+            st.download_button(
+                "下载 CSV",
+                data=build_export_csv(data),
+                file_name="letter_frequency_analysis.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+            with st.expander("查看详细数据"):
                 formatted = data[["Letter", "Count", "Frequency"]].copy()
                 formatted["Frequency"] = formatted["Frequency"].map(lambda value: f"{value:.2%}")
                 st.dataframe(formatted, use_container_width=True, hide_index=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
+
